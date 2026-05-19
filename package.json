@@ -1,6 +1,7 @@
 {
   "name": "shadday-wok",
   "version": "0.1.0",
+  "author": "Victor Zapata",
   "private": true,
   "description": "Aplicacion de escritorio para comandas, clientes, domiciliarios, rutas y estadisticas de Shadday Wok.",
   "main": "electron/main.js",
@@ -15,13 +16,13 @@
   },
   "dependencies": {
     "cors": "^2.8.5",
-    "electron": "^35.1.4",
     "express": "^5.1.0",
     "sql.js": "^1.12.0"
   }
   ,
   "devDependencies": {
-    "electron-builder": "^24.0.0"
+    "electron-builder": "^24.0.0",
+    "electron": "^35.1.4"
   },
   "build": {
     "appId": "com.shadday.wok",
