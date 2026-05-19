@@ -245,6 +245,7 @@ function renderStats(stats) {
     <div class="stat"><strong>${stats.cancelledOrders}</strong><span>Pedidos cancelados</span></div>
     <div class="stat"><strong>${money(stats.totalSales)}</strong><span>Ventas totales</span></div>
     <div class="stat"><strong>${stats.averageDeliveryTimeMinutes.toFixed(0)} min</strong><span>Tiempo promedio entrega</span></div>
+    <div class="stat"><strong>${(stats.averageDeliveryTimeMinutes || 0).toFixed(0)} min</strong><span>Tiempo promedio entrega</span></div>
     <div class="stat"><strong>${money(stats.averageTicket)}</strong><span>Ticket promedio</span></div>
     <div class="stat"><strong>${stats.topProduct}</strong><span>Producto mas vendido</span></div>
     <div class="stat"><strong>${stats.topDriver}</strong><span>Domiciliario lider</span></div>
@@ -265,6 +266,7 @@ function renderOverviewKpis() {
   document.getElementById('kpiCancelledOrders').textContent = stats ? String(stats.cancelledOrders) : '0';
   document.getElementById('kpiAverageTicket').textContent = stats ? money(stats.averageTicket) : money(0);
   document.getElementById('kpiAverageDeliveryTime').textContent = stats ? `${stats.averageDeliveryTimeMinutes.toFixed(0)} min` : '0 min';
+  document.getElementById('kpiAverageDeliveryTime').textContent = stats ? `${(stats.averageDeliveryTimeMinutes || 0).toFixed(0)} min` : '0 min';
   document.getElementById('overviewStatusText').textContent = `${orders.length} pedidos cargados`;
 }
 
@@ -319,6 +321,7 @@ function getOrderStatusClass(status) {
 }
 
 function renderOverviewInsights() {
+  const { stats } = dashboardState;
   const clientsByPhone = dashboardState.orders.reduce((accumulator, order) => {
     const key = order.client_phone;
     if (!accumulator[key]) {
