@@ -326,12 +326,24 @@
           <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--panel-border);">
             <h3 style="font-size: 1rem; margin-bottom: 10px;">Dirección Principal</h3>
             <div class="form-grid-modal">
-              <input name="address" type="text" placeholder="Dirección" required />
-              <input name="barrio" type="text" placeholder="Barrio" required />
-              <input name="reference" type="text" placeholder="Referencia" class="span-2" />
+              <div class="stack-form">
+                <label class="subtle">Dirección</label>
+                <input name="address" type="text" placeholder="Calle / Carrera" required />
+              </div>
+              <div class="stack-form">
+                <label class="subtle">Barrio</label>
+                <input name="barrio" type="text" placeholder="Nombre del barrio" required />
+              </div>
+              <div class="stack-form" style="grid-column: 1 / -1;">
+                <label class="subtle">Referencia</label>
+                <input name="reference" type="text" placeholder="Apto / Local / Color casa" />
+              </div>
             </div>
           </div>
-          <textarea name="notes" rows="2" placeholder="Notas internas..." style="margin-top: 10px;"></textarea>
+          <div class="stack-form" style="margin-top: 10px;">
+            <label class="subtle">Notas internas</label>
+            <textarea name="notes" rows="2" placeholder="Información adicional del cliente..." style="margin-top: 4px;"></textarea>
+          </div>
           <div class="inline-actions" style="margin-top: 20px;">
             <button type="submit" class="primary" style="flex: 1;">Guardar Cliente</button>
           </div>
