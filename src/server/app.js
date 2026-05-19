@@ -312,6 +312,41 @@ async function startServer() {
     response.status(201).json(db.prepare('SELECT * FROM products WHERE id = ?').get(result.lastInsertRowid));
   });
 
+  app.patch('/api/products/:id', (request, response) => {
+    const id = Number(request.params.id);
+    const product = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
+
+    if (!product) {
+      return response.status(404).json({ message: 'Producto no encontrado.' });
+    }
+
+    const name = String(request.body.name || product.name).trim();
+    const category = String(request.body.category || product.category).trim();
+    const price = request.body.price !== undefined ? toNumber(request.body.price) : product.price;
+    const active = request.body.active !== undefined ? (request.body.active ? 1 : 0) : product.active;
+
+    db.prepare(`
+      UPDATE products
+      SET name = ?, category = ?, price = ?, active = ?
+      WHERE id = ?
+    `).run(name, category, price, active, id);
+    db.save();
+    response.json(db.prepare('SELECT * FROM products WHERE id = ?').get(id));
+  });
+
+  app.delete('/api/products/:id', (request, response) => {
+    const id = Number(request.params.id);
+    const product = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
+
+    if (!product) {
+      return response.status(404).json({ message: 'Producto no encontrado.' });
+    }
+
+    db.prepare('DELETE FROM products WHERE id = ?').run(id);
+    db.save();
+    response.status(204).send();
+  });
+
   app.get('/api/drivers', (_request, response) => {
     response.json(db.prepare('SELECT * FROM drivers ORDER BY active DESC, name ASC').all());
   });

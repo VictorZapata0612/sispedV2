@@ -247,8 +247,18 @@ function renderProducts(products) {
   if (container) {
     container.innerHTML = products.map((product) => `
       <div class="row">
-        <strong>${product.name}</strong>
-        <div class="meta">${product.category} · ${money(product.price)} · ${product.active ? 'Activo' : 'Inactivo'}</div>
+        <div style="flex: 1;">
+          <strong>${product.name}</strong>
+          <div class="meta">${product.category} · ${money(product.price)}</div>
+        </div>
+        <div class="tag-row">
+          <span class="tag ${product.active ? 'success' : 'warning'}">${product.active ? 'Activo' : 'Inactivo'}</span>
+          <button type="button" data-product-toggle="${product.id}" data-active="${product.active ? '0' : '1'}">
+            ${product.active ? 'Desactivar' : 'Activar'}
+          </button>
+          <button type="button" data-product-edit="${product.id}">Editar</button>
+          <button type="button" data-product-delete="${product.id}" class="btn-danger">Eliminar</button>
+        </div>
       </div>
     `).join('');
   }
@@ -891,6 +901,85 @@ async function main() {
       body: JSON.stringify({ active: event.target.dataset.active === '1' })
     });
     await refreshDashboard();
+  });
+
+  // Event listeners para productos
+  document.getElementById('productsList').addEventListener('click', async (event) => {
+    const productId = event.target.dataset.productToggle;
+    const editId = event.target.dataset.productEdit;
+    const deleteId = event.target.dataset.productDelete;
+
+    if (productId) {
+      const isActivating = event.target.dataset.active === '1';
+      showToast(`Producto ${isActivating ? 'activado' : 'desactivado'}`, 'info');
+      await request(`/api/products/${productId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ active: event.target.dataset.active === '1' })
+      });
+      await refreshDashboard();
+    } else if (editId) {
+      const product = dashboardState.products.find(p => p.id === Number(editId));
+      if (product) {
+        showModal({
+          title: `Editar Producto: ${product.name}`,
+          body: `
+            <form id="editProductForm" class="order-form">
+              <div class="form-grid-modal">
+                <div class="stack-form">
+                  <label class="subtle">Nombre</label>
+                  <input name="name" type="text" value="${product.name}" required />
+                </div>
+                <div class="stack-form">
+                  <label class="subtle">Categoría</label>
+                  <input name="category" type="text" value="${product.category}" />
+                </div>
+              </div>
+              <div class="stack-form" style="margin-top: 10px;">
+                <label class="subtle">Precio</label>
+                <input name="price" type="number" value="${product.price}" min="0" step="100" required />
+              </div>
+            </form>
+          `,
+          confirmText: 'Guardar',
+          cancelText: 'Cancelar',
+          isWide: false,
+          onConfirm: async () => {
+            const form = document.getElementById('editProductForm');
+            const data = getFormData(form);
+            try {
+              await request(`/api/products/${editId}`, {
+                method: 'PATCH',
+                body: JSON.stringify({
+                  name: data.name,
+                  category: data.category,
+                  price: Number(data.price)
+                })
+              });
+              showToast('Producto actualizado', 'success');
+              await refreshDashboard();
+            } catch (err) {
+              showToast(err.message, 'error');
+            }
+          }
+        });
+      }
+    } else if (deleteId) {
+      showModal({
+        title: '¿Eliminar producto?',
+        body: 'Esta acción no se puede deshacer.',
+        confirmText: 'Eliminar',
+        cancelText: 'Cancelar',
+        onConfirm: async () => {
+          try {
+            await request(`/api/products/${deleteId}`, { method: 'DELETE' });
+            showToast('Producto eliminado', 'success');
+            await refreshDashboard();
+          } catch (err) {
+            showToast(err.message, 'error');
+          }
+        }
+      });
+    }
   });
 
   document.getElementById('statsForm').addEventListener('submit', async (event) => {
