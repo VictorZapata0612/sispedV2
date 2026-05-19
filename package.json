@@ -1,0 +1,19 @@
+{
+  "name": "shadday-wok",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Aplicacion de escritorio para comandas, clientes, domiciliarios, rutas y estadisticas de Shadday Wok.",
+  "main": "electron/main.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron .",
+    "server": "node src/server/app.js",
+    "check": "node --check electron/main.js && node --check src/server/app.js && node --check src/server/db.js && node --check src/renderer/app.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "electron": "^35.1.4",
+    "express": "^5.1.0",
+    "sql.js": "^1.12.0"
+  }
+}

@@ -1,0 +1,254 @@
+const fs = require('fs');
+const path = require('path');
+const initSqlJs = require('sql.js');
+
+const dataDir = path.join(__dirname, '..', '..', 'data');
+const dbPath = path.join(dataDir, 'shadday-wok.sqlite');
+
+function ensureDirectory() {
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+}
+
+function getWasmPath() {
+  return path.dirname(require.resolve('sql.js/dist/sql-wasm.wasm'));
+}
+
+function toArray(params) {
+  if (params.length === 1 && Array.isArray(params[0])) {
+    return params[0];
+  }
+  return params;
+}
+
+async function createSqlDatabase() {
+  ensureDirectory();
+
+  const SQL = await initSqlJs({
+    locateFile: (file) => path.join(getWasmPath(), file)
+  });
+
+  let database;
+  if (fs.existsSync(dbPath)) {
+    const fileBuffer = fs.readFileSync(dbPath);
+    database = new SQL.Database(new Uint8Array(fileBuffer));
+  } else {
+    database = new SQL.Database();
+  }
+
+  database.exec('PRAGMA foreign_keys = ON;');
+
+  function persist() {
+    const data = database.export();
+    fs.writeFileSync(dbPath, Buffer.from(data));
+  }
+
+  function runStatement(sql, params = []) {
+    const statement = database.prepare(sql);
+    statement.bind(params);
+    statement.step();
+    const changes = database.getRowsModified();
+    const lastIdRow = database.exec('SELECT last_insert_rowid() AS id;');
+    statement.free();
+    persist();
+    return {
+      changes,
+      lastInsertRowid: lastIdRow.length ? lastIdRow[0].values[0][0] : 0
+    };
+  }
+
+  const db = {
+    exec(sql) {
+      const result = database.exec(sql);
+      persist();
+      return result;
+    },
+    prepare(sql) {
+      return {
+        get(...params) {
+          const statement = database.prepare(sql);
+          statement.bind(toArray(params));
+          const row = statement.step() ? statement.getAsObject() : undefined;
+          statement.free();
+          return row;
+        },
+        all(...params) {
+          const statement = database.prepare(sql);
+          statement.bind(toArray(params));
+          const rows = [];
+          while (statement.step()) {
+            rows.push(statement.getAsObject());
+          }
+          statement.free();
+          return rows;
+        },
+        run(...params) {
+          return runStatement(sql, toArray(params));
+        }
+      };
+    },
+    transaction(callback) {
+      return (...args) => {
+        database.exec('BEGIN TRANSACTION;');
+        try {
+          const result = callback(...args);
+          database.exec('COMMIT;');
+          persist();
+          return result;
+        } catch (error) {
+          database.exec('ROLLBACK;');
+          throw error;
+        }
+      };
+    },
+    close() {
+      persist();
+      database.close();
+    }
+  };
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS clients (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      phone TEXT NOT NULL UNIQUE,
+      notes TEXT DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS client_addresses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      client_id INTEGER NOT NULL,
+      label TEXT NOT NULL DEFAULT 'principal',
+      address TEXT NOT NULL,
+      barrio TEXT NOT NULL DEFAULT '',
+      reference TEXT NOT NULL DEFAULT '',
+      is_primary INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS products (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'General',
+      price REAL NOT NULL DEFAULT 0,
+      combo_items TEXT NOT NULL DEFAULT '[]',
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS drivers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      phone TEXT NOT NULL DEFAULT '',
+      vehicle TEXT NOT NULL DEFAULT 'Moto',
+      zone TEXT NOT NULL DEFAULT '',
+      active INTEGER NOT NULL DEFAULT 1,
+      current_status TEXT NOT NULL DEFAULT 'disponible',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS orders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      client_id INTEGER NOT NULL,
+      driver_id INTEGER,
+      status TEXT NOT NULL DEFAULT 'nuevo',
+      payment_method TEXT NOT NULL,
+      barrio TEXT NOT NULL DEFAULT '',
+      address TEXT NOT NULL,
+      reference TEXT NOT NULL DEFAULT '',
+      notes TEXT NOT NULL DEFAULT '',
+      cancelled_reason TEXT NOT NULL DEFAULT '',
+      total REAL NOT NULL DEFAULT 0,
+      route_zone TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (client_id) REFERENCES clients(id),
+      FOREIGN KEY (driver_id) REFERENCES drivers(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS order_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER NOT NULL,
+      product_id INTEGER NOT NULL,
+      name_snapshot TEXT NOT NULL,
+      quantity INTEGER NOT NULL DEFAULT 1,
+      unit_price REAL NOT NULL DEFAULT 0,
+      line_total REAL NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+      FOREIGN KEY (product_id) REFERENCES products(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS route_suggestions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER NOT NULL,
+      driver_id INTEGER,
+      barrio_group TEXT NOT NULL DEFAULT '',
+      route_json TEXT NOT NULL DEFAULT '[]',
+      distance_km REAL NOT NULL DEFAULT 0,
+      eta_minutes REAL NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+      FOREIGN KEY (driver_id) REFERENCES drivers(id)
+    );
+  `);
+
+  const productCount = db.prepare('SELECT COUNT(*) AS total FROM products').get();
+  if ((productCount && Number(productCount.total)) === 0) {
+    const insertClient = db.prepare('INSERT INTO clients (name, phone, notes) VALUES (?, ?, ?)');
+    const insertAddress = db.prepare('INSERT INTO client_addresses (client_id, label, address, barrio, reference, is_primary) VALUES (?, ?, ?, ?, ?, ?)');
+    const insertProduct = db.prepare('INSERT INTO products (name, category, price, combo_items, active) VALUES (?, ?, ?, ?, ?)');
+    const insertDriver = db.prepare('INSERT INTO drivers (name, phone, vehicle, zone, active, current_status) VALUES (?, ?, ?, ?, ?, ?)');
+    const insertOrder = db.prepare('INSERT INTO orders (client_id, driver_id, status, payment_method, barrio, address, reference, notes, total, route_zone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    const insertItem = db.prepare('INSERT INTO order_items (order_id, product_id, name_snapshot, quantity, unit_price, line_total) VALUES (?, ?, ?, ?, ?, ?)');
+
+    const clientOne = insertClient.run('Andres Lopez', '3001112233', 'Cliente frecuente').lastInsertRowid;
+    const clientTwo = insertClient.run('Maria Perez', '3012223344', 'Pide sin cebolla').lastInsertRowid;
+    const clientThree = insertClient.run('Juan Rojas', '3023334455', 'Pago por transferencia').lastInsertRowid;
+
+    insertAddress.run(clientOne, 'casa', 'Calle 5 # 23-18', 'San Fernando', 'Cerca al parque', 1);
+    insertAddress.run(clientTwo, 'principal', 'Carrera 34 # 7-80', 'Tequendama', 'Torre 2 apto 301', 1);
+    insertAddress.run(clientThree, 'trabajo', 'Avenida 6 # 11-25', 'Granada', 'Oficina 403', 1);
+
+    insertProduct.run('Arroz wok pollo', 'Platos fuertes', 26000, JSON.stringify([]), 1);
+    insertProduct.run('Arroz wok cerdo', 'Platos fuertes', 27000, JSON.stringify([]), 1);
+    insertProduct.run('Ramen especial', 'Especiales', 32000, JSON.stringify([]), 1);
+    insertProduct.run('Combo familiar', 'Combos', 58000, JSON.stringify(['2 arroces + 2 bebidas']), 1);
+    insertProduct.run('Gaseosa personal', 'Bebidas', 5000, JSON.stringify([]), 1);
+
+    insertDriver.run('Carlos Gomez', '3205551001', 'Moto', 'Sur', 1, 'disponible');
+    insertDriver.run('Diego Torres', '3205551002', 'Moto', 'Centro', 1, 'disponible');
+    insertDriver.run('Luis Perez', '3205551003', 'Moto', 'Norte', 1, 'disponible');
+    insertDriver.run('Miguel Ruiz', '3205551004', 'Moto', 'Oeste', 0, 'inactivo');
+
+    const orderOne = insertOrder.run(clientOne, 1, 'en ruta', 'Efectivo', 'San Fernando', 'Calle 5 # 23-18', 'Porteria 2', 'Sin cebolla', 26000, 'Sur').lastInsertRowid;
+    const orderTwo = insertOrder.run(clientTwo, 2, 'listo para salir', 'Nequi/Daviplata', 'Tequendama', 'Carrera 34 # 7-80', 'Apto 301', 'Extra salsa', 32000, 'Centro').lastInsertRowid;
+    const orderThree = insertOrder.run(clientThree, null, 'nuevo', 'Transferencia', 'Granada', 'Avenida 6 # 11-25', 'Oficina 403', 'Entregar antes de las 7', 58000, 'Norte').lastInsertRowid;
+
+    insertItem.run(orderOne, 1, 'Arroz wok pollo', 1, 26000, 26000);
+    insertItem.run(orderTwo, 3, 'Ramen especial', 1, 32000, 32000);
+    insertItem.run(orderThree, 4, 'Combo familiar', 1, 58000, 58000);
+  }
+
+  persist();
+  return db;
+}
+
+function openDatabase() {
+  if (!global.__shaddayDbPromise) {
+    global.__shaddayDbPromise = createSqlDatabase();
+  }
+
+  return global.__shaddayDbPromise;
+}
+
+module.exports = {
+  dbPath,
+  openDatabase
+};
